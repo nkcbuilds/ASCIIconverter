@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { EffectType, EffectSettings } from '../types/effects';
+import { PreviewMode, RenderOutput } from './Editor';
 
 interface CanvasProps {
     sourceImage: string | null;
@@ -7,8 +8,11 @@ interface CanvasProps {
     activeEffect: EffectType;
     settings: EffectSettings;
     zoom: number;
+    previewMode: PreviewMode;
     onFpsUpdate: (fps: number) => void;
+    onOutputUpdate: (output: RenderOutput) => void;
     setIsProcessing: (processing: boolean) => void;
+    onExportReady?: (getCanvas: () => HTMLCanvasElement | null) => void;
 }
 
 export function Canvas({
@@ -17,10 +21,12 @@ export function Canvas({
     activeEffect,
     settings,
     zoom,
+    previewMode,
     onFpsUpdate,
+    onOutputUpdate,
     setIsProcessing,
+    onExportReady,
 }: CanvasProps) {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
     const outputCanvasRef = useRef<HTMLCanvasElement>(null);
     const imageRef = useRef<HTMLImageElement | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -32,10 +38,13 @@ export function Canvas({
     const [error, setError] = useState<string | null>(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-    // Load source image/video
+    useEffect(() => {
+        if (!onExportReady) return;
+        onExportReady(() => outputCanvasRef.current);
+    }, [onExportReady]);
+
     useEffect(() => {
         if (!sourceImage || sourceImage === 'webcam') return;
-
         setIsLoading(true);
         setError(null);
 
@@ -76,18 +85,15 @@ export function Canvas({
         };
     }, [sourceImage, sourceType]);
 
-    // Handle webcam
     useEffect(() => {
         if (sourceType !== 'webcam') return;
-
         let stream: MediaStream | null = null;
 
         const startWebcam = async () => {
             try {
                 setIsLoading(true);
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 1280, height: 720 }
-                });
+                setError(null);
+                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
                 const video = document.createElement('video');
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
@@ -96,7 +102,7 @@ export function Canvas({
                     setIsLoading(false);
                     video.play();
                 };
-            } catch (err) {
+            } catch {
                 setError('Failed to access webcam');
                 setIsLoading(false);
             }
@@ -105,9 +111,7 @@ export function Canvas({
         startWebcam();
 
         return () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
+            if (stream) stream.getTracks().forEach((track) => track.stop());
             if (videoRef.current) {
                 videoRef.current.pause();
                 videoRef.current = null;
@@ -115,43 +119,61 @@ export function Canvas({
         };
     }, [sourceType]);
 
-    // Apply effect and render
     const render = useCallback(() => {
         const canvas = outputCanvasRef.current;
         const ctx = canvas?.getContext('2d');
-
-        if (!canvas || !ctx) return;
-
-        // Get source
         const source = imageRef.current || videoRef.current;
-        if (!source) return;
+        if (!canvas || !ctx || !source || !dimensions.width || !dimensions.height) return;
 
-        // Set canvas size based on cell size
-        const cellSize = settings.cellSize;
-        const cols = Math.floor(dimensions.width / cellSize);
-        const rows = Math.floor(dimensions.height / cellSize);
+        const cellSize = Math.max(1, Math.floor(settings.cellSize));
+        const cols = Math.max(1, Math.floor(dimensions.width / cellSize));
+        const rows = Math.max(1, Math.floor(dimensions.height / cellSize));
 
         canvas.width = cols * cellSize;
         canvas.height = rows * cellSize;
 
-        // Draw source to temp canvas for pixel access
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = cols;
         tempCanvas.height = rows;
-        const tempCtx = tempCanvas.getContext('2d')!;
-        tempCtx.drawImage(source, 0, 0, cols, rows);
+        const tempCtx = tempCanvas.getContext('2d');
+        if (!tempCtx) return;
 
+        tempCtx.drawImage(source, 0, 0, cols, rows);
         const imageData = tempCtx.getImageData(0, 0, cols, rows);
         const pixels = imageData.data;
 
-        // Clear output canvas
-        ctx.fillStyle = settings.bgColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (previewMode === 'original') {
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+        } else if (previewMode === 'split') {
+            const splitX = Math.floor(cols / 2);
+            drawProcessed(ctx, pixels, cols, rows, cellSize, activeEffect, settings, splitX);
+            ctx.drawImage(
+                source,
+                splitX * cellSize,
+                0,
+                canvas.width - splitX * cellSize,
+                canvas.height,
+                splitX * cellSize,
+                0,
+                canvas.width - splitX * cellSize,
+                canvas.height
+            );
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(splitX * cellSize, 0);
+            ctx.lineTo(splitX * cellSize, canvas.height);
+            ctx.stroke();
+        } else {
+            drawProcessed(ctx, pixels, cols, rows, cellSize, activeEffect, settings, cols);
+        }
 
-        // Apply effect
-        applyEffect(ctx, pixels, cols, rows, cellSize, activeEffect, settings);
+        onOutputUpdate({
+            dataUrl: canvas.toDataURL('image/png'),
+            asciiText: generateAsciiText(pixels, cols, rows, settings),
+        });
 
-        // Update FPS
         const now = performance.now();
         frameCountRef.current++;
         if (now - lastTimeRef.current >= 1000) {
@@ -160,294 +182,258 @@ export function Canvas({
             lastTimeRef.current = now;
         }
 
-        // Continue animation for video/webcam
         if (sourceType === 'video' || sourceType === 'webcam') {
             animationRef.current = requestAnimationFrame(render);
         }
-    }, [dimensions, activeEffect, settings, sourceType, onFpsUpdate]);
+    }, [activeEffect, dimensions.height, dimensions.width, onFpsUpdate, onOutputUpdate, previewMode, settings, sourceType]);
 
-    // Start rendering when source is ready
     useEffect(() => {
         if (!sourceImage || isLoading) return;
-
         setIsProcessing(true);
         lastTimeRef.current = performance.now();
 
         if (sourceType === 'image') {
-            // Single render for images
             requestAnimationFrame(() => {
                 render();
                 setIsProcessing(false);
             });
         } else {
-            // Animation loop for video/webcam
             animationRef.current = requestAnimationFrame(render);
         }
 
         return () => {
-            if (animationRef.current) {
-                cancelAnimationFrame(animationRef.current);
-            }
+            if (animationRef.current) cancelAnimationFrame(animationRef.current);
             setIsProcessing(false);
         };
     }, [sourceImage, isLoading, sourceType, render, setIsProcessing]);
 
     return (
         <div className="flex-1 bg-term-bg flex items-center justify-center overflow-auto p-4 relative">
-            {/* Loading State */}
             {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-term-bg/80 z-10">
                     <div className="text-term-text-dim text-sm">Loading...</div>
                 </div>
             )}
-
-            {/* Error State */}
             {error && (
                 <div className="absolute inset-0 flex items-center justify-center bg-term-bg/80 z-10">
                     <div className="text-red-500 text-sm">{error}</div>
                 </div>
             )}
-
-            {/* Empty State */}
             {!sourceImage && !isLoading && (
                 <div className="text-center">
                     <p className="text-term-text-dim text-sm mb-2">Waiting Input</p>
-                    <p className="text-term-text-dim text-xs opacity-60">
-                        Drop a file or capture a source
-                    </p>
+                    <p className="text-term-text-dim text-xs opacity-60">Drop a file or capture a source</p>
                 </div>
             )}
 
-            {/* Output Canvas */}
             {sourceImage && (
-                <div
-                    className="relative"
-                    style={{
-                        transform: `scale(${zoom / 100})`,
-                        transformOrigin: 'center center',
-                    }}
-                >
+                <div className="relative" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center' }}>
                     <canvas
                         ref={outputCanvasRef}
                         className="block"
-                        style={{
-                            imageRendering: 'pixelated',
-                            filter: settings.scanlines
-                                ? 'url(#scanlines)'
-                                : settings.blur > 0
-                                    ? `blur(${settings.blur}px)`
-                                    : 'none',
-                        }}
+                        style={{ imageRendering: 'pixelated', filter: settings.blur > 0 ? `blur(${settings.blur}px)` : 'none' }}
                     />
-
-                    {/* Scanlines SVG Filter */}
-                    <svg className="absolute w-0 h-0">
-                        <filter id="scanlines">
-                            <feColorMatrix type="saturate" values="1" />
-                        </filter>
-                    </svg>
-
-                    {/* Scanlines Overlay */}
-                    {settings.scanlines && (
-                        <div
-                            className="absolute inset-0 pointer-events-none"
-                            style={{
-                                background: 'repeating-linear-gradient(0deg, transparent 0px, transparent 1px, rgba(0,0,0,0.3) 1px, rgba(0,0,0,0.3) 2px)',
-                            }}
-                        />
-                    )}
                 </div>
             )}
-
-            {/* Hidden reference canvas */}
-            <canvas ref={canvasRef} className="hidden" />
         </div>
     );
 }
 
-// ASCII character sets
 const ASCII_STANDARD = ' .:-=+*#%@';
-const ASCII_EXTENDED = ' .\':,;clodxkO0KXNWM';
-const ASCII_BLOCKS = ' ░▒▓█';
+const ASCII_EXTENDED = " .':,;clodxkO0KXNWM";
+const ASCII_BLOCKS = ' .:-=+*#%@';
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+}
 
 function getCharacterSet(type: string, custom: string): string {
     switch (type) {
-        case 'extended': return ASCII_EXTENDED;
-        case 'blocks': return ASCII_BLOCKS;
-        case 'custom': return custom || ASCII_STANDARD;
-        default: return ASCII_STANDARD;
+        case 'extended':
+            return ASCII_EXTENDED;
+        case 'blocks':
+            return ASCII_BLOCKS;
+        case 'custom':
+            return custom || ASCII_STANDARD;
+        default:
+            return ASCII_STANDARD;
     }
 }
 
-function applyEffect(
+function generateAsciiText(pixels: Uint8ClampedArray, cols: number, rows: number, settings: EffectSettings): string {
+    const charset = getCharacterSet(settings.characterSet, settings.customCharacters);
+    const lines: string[] = [];
+
+    for (let y = 0; y < rows; y++) {
+        let line = '';
+        for (let x = 0; x < cols; x++) {
+            const i = (y * cols + x) * 4;
+            const brightness = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3 / 255;
+            const index = Math.floor(brightness * (charset.length - 1));
+            line += charset[index] ?? ' ';
+        }
+        lines.push(line);
+    }
+
+    return lines.join('\n');
+}
+
+function drawProcessed(
     ctx: CanvasRenderingContext2D,
     pixels: Uint8ClampedArray,
     cols: number,
     rows: number,
     cellSize: number,
     effect: EffectType,
-    settings: EffectSettings
+    settings: EffectSettings,
+    renderCols: number
 ) {
     const charset = getCharacterSet(settings.characterSet, settings.customCharacters);
 
-    // Apply brightness/contrast adjustments
-    const adjustPixel = (r: number, g: number, b: number) => {
-        const brightness = settings.brightness / 100;
-        const contrast = (settings.contrast + 100) / 100;
-
-        r = ((r / 255 - 0.5) * contrast + 0.5 + brightness) * 255;
-        g = ((g / 255 - 0.5) * contrast + 0.5 + brightness) * 255;
-        b = ((b / 255 - 0.5) * contrast + 0.5 + brightness) * 255;
-
-        if (settings.invert) {
-            r = 255 - r;
-            g = 255 - g;
-            b = 255 - b;
-        }
-
-        return [
-            Math.max(0, Math.min(255, r)),
-            Math.max(0, Math.min(255, g)),
-            Math.max(0, Math.min(255, b)),
-        ];
-    };
-
+    ctx.fillStyle = settings.bgColor;
+    ctx.fillRect(0, 0, cols * cellSize, rows * cellSize);
     ctx.font = `${cellSize * settings.spacing}px "IBM Plex Mono", monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Add glow effect
-    if (settings.glow > 0) {
-        ctx.shadowColor = settings.fgColor;
-        ctx.shadowBlur = settings.glow * 10;
-    }
-
     for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < cols; x++) {
+        for (let x = 0; x < renderCols; x++) {
             const i = (y * cols + x) * 4;
-            let [r, g, b] = adjustPixel(pixels[i], pixels[i + 1], pixels[i + 2]);
+            let r = pixels[i];
+            let g = pixels[i + 1];
+            let b = pixels[i + 2];
+
+            if (settings.invert || effect === 'invert') {
+                r = 255 - r;
+                g = 255 - g;
+                b = 255 - b;
+            }
+
+            if (settings.noise > 0 && Math.random() < settings.noise) {
+                const n = (Math.random() - 0.5) * 80;
+                r = clamp(r + n, 0, 255);
+                g = clamp(g + n, 0, 255);
+                b = clamp(b + n, 0, 255);
+            }
 
             const brightness = (r + g + b) / 3 / 255;
+            const normalized = clamp(
+                (brightness + settings.brightness / 100) * ((settings.contrast + 100) / 100),
+                0,
+                1
+            );
 
-            switch (effect) {
-                case 'ascii':
-                case 'dithering':
-                case 'matrix-rain': {
-                    const charIndex = Math.floor(brightness * (charset.length - 1));
-                    const char = charset[charIndex];
+            if (effect === 'convolution') {
+                const kernel = [
+                    0, -1, 0,
+                    -1, 5, -1,
+                    0, -1, 0,
+                ];
+                let rr = 0;
+                let gg = 0;
+                let bb = 0;
 
-                    if (settings.colored) {
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    } else {
-                        // Fade color based on brightness
-                        const alpha = brightness * settings.fxOpacity + (1 - settings.fxOpacity);
-                        ctx.fillStyle = settings.fgColor + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+                for (let ky = -1; ky <= 1; ky++) {
+                    for (let kx = -1; kx <= 1; kx++) {
+                        const sx = clamp(x + kx, 0, cols - 1);
+                        const sy = clamp(y + ky, 0, rows - 1);
+                        const si = (sy * cols + sx) * 4;
+                        const w = kernel[(ky + 1) * 3 + (kx + 1)];
+                        rr += pixels[si] * w;
+                        gg += pixels[si + 1] * w;
+                        bb += pixels[si + 2] * w;
                     }
-
-                    ctx.fillText(char, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
-                    break;
                 }
 
-                case 'pixelate':
-                case 'mosaic':
-                case 'pixel-grid': {
-                    if (settings.colored) {
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    } else {
-                        const gray = Math.floor(brightness * 255);
-                        ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
-                    }
-
-                    const gap = effect === 'pixel-grid' ? 1 : 0;
-                    ctx.fillRect(
-                        x * cellSize + gap,
-                        y * cellSize + gap,
-                        cellSize - gap * 2,
-                        cellSize - gap * 2
-                    );
-                    break;
-                }
-
-                case 'threshold': {
-                    const isWhite = brightness > settings.threshold;
-                    ctx.fillStyle = isWhite ? '#ffffff' : '#000000';
-                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-                    break;
-                }
-
-                case 'halftone-dots':
-                case 'crosses': {
-                    const radius = (brightness * cellSize) / 2;
-
-                    if (settings.colored) {
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    } else {
-                        ctx.fillStyle = settings.fgColor;
-                    }
-
-                    if (effect === 'crosses') {
-                        const size = radius * 0.8;
-                        ctx.fillRect(x * cellSize + cellSize / 2 - size / 6, y * cellSize + cellSize / 2 - size / 2, size / 3, size);
-                        ctx.fillRect(x * cellSize + cellSize / 2 - size / 2, y * cellSize + cellSize / 2 - size / 6, size, size / 3);
-                    } else {
-                        ctx.beginPath();
-                        ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, radius * 0.4, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                    break;
-                }
-
-                case 'led': {
-                    if (settings.colored) {
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    } else {
-                        const intensity = brightness;
-                        ctx.fillStyle = `rgba(${parseInt(settings.fgColor.slice(1, 3), 16)}, ${parseInt(settings.fgColor.slice(3, 5), 16)}, ${parseInt(settings.fgColor.slice(5, 7), 16)}, ${intensity})`;
-                    }
-
-                    ctx.beginPath();
-                    ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, cellSize * 0.4, 0, Math.PI * 2);
-                    ctx.fill();
-                    break;
-                }
-
-                case 'edge-detection':
-                case 'edge-lines': {
-                    // Simple edge detection using neighbors
-                    let edgeStrength = 0;
-                    if (x > 0 && x < cols - 1 && y > 0 && y < rows - 1) {
-                        const getPixelBrightness = (px: number, py: number) => {
-                            const pi = (py * cols + px) * 4;
-                            return (pixels[pi] + pixels[pi + 1] + pixels[pi + 2]) / 3;
-                        };
-
-                        const gx = getPixelBrightness(x + 1, y) - getPixelBrightness(x - 1, y);
-                        const gy = getPixelBrightness(x, y + 1) - getPixelBrightness(x, y - 1);
-                        edgeStrength = Math.sqrt(gx * gx + gy * gy) / 255;
-                    }
-
-                    if (edgeStrength > settings.threshold) {
-                        ctx.fillStyle = settings.fgColor;
-                        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-                    }
-                    break;
-                }
-
-                case 'invert': {
-                    ctx.fillStyle = `rgb(${255 - r}, ${255 - g}, ${255 - b})`;
-                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-                    break;
-                }
-
-                default: {
-                    // Default: colored pixels
-                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-                }
+                ctx.fillStyle = settings.colored
+                    ? `rgb(${clamp(rr, 0, 255)}, ${clamp(gg, 0, 255)}, ${clamp(bb, 0, 255)})`
+                    : `rgb(${normalized * 255}, ${normalized * 255}, ${normalized * 255})`;
+                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                continue;
             }
+
+            if (effect === 'edge-detection' || effect === 'edge-lines') {
+                let edgeStrength = 0;
+                if (x > 0 && x < cols - 1 && y > 0 && y < rows - 1) {
+                    const idxL = (y * cols + (x - 1)) * 4;
+                    const idxR = (y * cols + (x + 1)) * 4;
+                    const idxT = ((y - 1) * cols + x) * 4;
+                    const idxB = ((y + 1) * cols + x) * 4;
+                    const gx = ((pixels[idxR] + pixels[idxR + 1] + pixels[idxR + 2]) - (pixels[idxL] + pixels[idxL + 1] + pixels[idxL + 2])) / 3;
+                    const gy = ((pixels[idxB] + pixels[idxB + 1] + pixels[idxB + 2]) - (pixels[idxT] + pixels[idxT + 1] + pixels[idxT + 2])) / 3;
+                    edgeStrength = Math.sqrt(gx * gx + gy * gy) / 255;
+                }
+
+                if (edgeStrength > settings.threshold) {
+                    ctx.fillStyle = settings.fgColor;
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+                continue;
+            }
+
+            if (effect === 'matrix-dots') {
+                const radius = Math.max(0.5, normalized * (cellSize * 0.45));
+                ctx.fillStyle = settings.colored ? `rgb(${r}, ${g}, ${b})` : settings.fgColor;
+                ctx.beginPath();
+                ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, radius, 0, Math.PI * 2);
+                ctx.fill();
+                continue;
+            }
+
+            if (effect === 'half-tone' || effect === 'halftone-dots') {
+                const radius = (normalized * cellSize) / 2;
+                ctx.fillStyle = settings.colored ? `rgb(${r}, ${g}, ${b})` : settings.fgColor;
+                ctx.beginPath();
+                ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, radius * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+                continue;
+            }
+
+            if (effect === 'crosses') {
+                const radius = (normalized * cellSize) / 2;
+                ctx.fillStyle = settings.colored ? `rgb(${r}, ${g}, ${b})` : settings.fgColor;
+                ctx.fillRect(x * cellSize + cellSize / 2 - 1, y * cellSize + cellSize / 2 - radius / 2, 2, radius);
+                ctx.fillRect(x * cellSize + cellSize / 2 - radius / 2, y * cellSize + cellSize / 2 - 1, radius, 2);
+                continue;
+            }
+
+            if (effect === 'threshold') {
+                ctx.fillStyle = normalized > settings.threshold ? '#ffffff' : '#000000';
+                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                continue;
+            }
+
+            if (effect === 'pixelate' || effect === 'mosaic' || effect === 'pixel-grid' || effect === 'led') {
+                if (effect === 'led') {
+                    const radius = Math.max(1, cellSize * 0.35);
+                    ctx.fillStyle = settings.colored ? `rgb(${r}, ${g}, ${b})` : settings.fgColor;
+                    ctx.beginPath();
+                    ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = settings.colored
+                        ? `rgb(${r}, ${g}, ${b})`
+                        : `rgb(${normalized * 255}, ${normalized * 255}, ${normalized * 255})`;
+                    const gap = effect === 'pixel-grid' ? 1 : 0;
+                    ctx.fillRect(x * cellSize + gap, y * cellSize + gap, cellSize - gap * 2, cellSize - gap * 2);
+                }
+                continue;
+            }
+
+            const char = charset[Math.floor(normalized * (charset.length - 1))] ?? ' ';
+            ctx.fillStyle = settings.colored ? `rgb(${r}, ${g}, ${b})` : settings.fgColor;
+            ctx.fillText(char, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
         }
     }
 
-    // Reset shadow
-    ctx.shadowBlur = 0;
+    if (settings.noise > 0) {
+        const overlayAlpha = Math.min(0.3, settings.noise * 0.25);
+        ctx.fillStyle = `rgba(255,255,255,${overlayAlpha})`;
+        const count = Math.floor(cols * rows * settings.noise);
+        for (let n = 0; n < count; n++) {
+            const nx = Math.floor(Math.random() * cols) * cellSize;
+            const ny = Math.floor(Math.random() * rows) * cellSize;
+            ctx.fillRect(nx, ny, 1, 1);
+        }
+    }
 }

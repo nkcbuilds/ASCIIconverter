@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState } from 'react';
-import { EffectType, EFFECT_CATEGORIES, PRESETS } from '../types/effects';
+import { EffectType, EFFECT_CATEGORIES, PRESETS, Preset } from '../types/effects';
 
 interface LeftSidebarProps {
     activeEffect: EffectType;
@@ -7,6 +7,7 @@ interface LeftSidebarProps {
     onFileSelect: (file: File) => void;
     onWebcam: () => void;
     hasSource: boolean;
+    onPresetSelect: (preset: Preset) => void;
 }
 
 export function LeftSidebar({
@@ -15,6 +16,7 @@ export function LeftSidebar({
     onFileSelect,
     onWebcam,
     hasSource,
+    onPresetSelect,
 }: LeftSidebarProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -181,7 +183,7 @@ export function LeftSidebar({
                         {PRESETS.map(preset => (
                             <button
                                 key={preset.id}
-                                onClick={() => setActiveEffect(preset.effect)}
+                                onClick={() => onPresetSelect(preset)}
                                 className="w-full px-2 py-1 text-[10px] text-term-text-dim hover:text-term-text hover:bg-term-border/30 transition-colors text-left"
                             >
                                 {preset.name}
