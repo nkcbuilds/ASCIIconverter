@@ -52,17 +52,17 @@ export function RightSidebar({
     };
 
     return (
-        <div className="w-64 border-l border-term-border bg-term-panel flex flex-col overflow-hidden">
+        <div className="w-[318px] xl:w-[336px] border-l border-term-border bg-term-panel flex flex-col overflow-hidden">
             <div className="px-3 py-2 border-b border-term-border flex items-center justify-between">
-                <span className="text-term-text-dim text-[10px] uppercase tracking-wide">Settings</span>
-                <button onClick={onResetSettings} className="text-term-text-dim text-[10px] hover:text-term-text">
+                <span className="text-term-text-dim text-[11px] uppercase tracking-wide">- Settings</span>
+                <button type="button" onClick={onResetSettings} className="text-term-text-dim text-[11px] hover:text-term-text">
                     Reset
                 </button>
             </div>
 
             <div className="flex-1 overflow-y-auto">
                 <div className="px-3 py-2 border-b border-term-border">
-                    <span className="text-term-text-bright text-xs">{getEffectName(activeEffect)}</span>
+                    <span className="text-term-text-bright text-[14px] truncate">{getEffectName(activeEffect)}</span>
                 </div>
 
                 <SettingsSection title="Preview">
@@ -71,7 +71,7 @@ export function RightSidebar({
                             <button
                                 key={mode}
                                 onClick={() => setPreviewMode(mode)}
-                                className={`px-2 py-1 text-[9px] uppercase border ${previewMode === mode ? 'border-term-accent text-term-accent' : 'border-term-border text-term-text-dim hover:border-term-text'}`}
+                                className={`px-2 py-1 text-[10px] uppercase border ${previewMode === mode ? 'border-term-accent text-term-accent' : 'border-term-border text-term-text-dim hover:border-term-text'}`}
                             >
                                 {mode}
                             </button>
@@ -105,7 +105,7 @@ export function RightSidebar({
 
                 <SettingsSection title="Color">
                     <div className="flex items-center justify-between">
-                        <span className="text-term-text-dim text-[10px]">Auto Color</span>
+                        <span className="text-term-text-dim text-[11px]">Auto Color</span>
                         <input type="checkbox" checked={settings.colored} onChange={(e) => updateSetting('colored', e.target.checked)} className="w-4 h-4 accent-term-accent" />
                     </div>
                 </SettingsSection>
@@ -116,7 +116,7 @@ export function RightSidebar({
                             <button
                                 key={format}
                                 onClick={() => updateSetting('format', format)}
-                                className={`px-2 py-1 text-[9px] uppercase border ${settings.format === format ? 'border-term-accent text-term-accent' : 'border-term-border text-term-text-dim hover:border-term-text'}`}
+                                className={`px-2 py-1 text-[10px] uppercase border ${settings.format === format ? 'border-term-accent text-term-accent' : 'border-term-border text-term-text-dim hover:border-term-text'}`}
                             >
                                 {format}
                             </button>
@@ -127,9 +127,10 @@ export function RightSidebar({
 
             <div className="p-3 border-t border-term-border">
                 <button
+                    type="button"
                     onClick={() => onExport(settings.format)}
                     disabled={!sourceImage}
-                    className={`w-full py-2 text-[11px] uppercase tracking-wide transition-colors ${sourceImage ? 'bg-term-text-bright text-term-bg hover:bg-term-accent' : 'bg-term-border text-term-text-dim cursor-not-allowed'}`}
+                    className={`w-full py-2 text-[12px] uppercase tracking-wide transition-colors ${sourceImage ? 'bg-term-text-bright text-term-bg hover:bg-term-accent' : 'bg-term-border text-term-text-dim cursor-not-allowed'}`}
                 >
                     Export {settings.format.toUpperCase()}
                 </button>
@@ -161,7 +162,7 @@ function SliderField({ label, value, min, max, step, onChange }: { label: string
                 step={step}
                 value={value}
                 onChange={(e) => onChange(parseFloat(e.target.value))}
-                className="w-full h-1 bg-term-border appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-term-text-bright"
+                className="w-full h-1 bg-term-border appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-term-text-bright"
             />
         </div>
     );
@@ -169,7 +170,7 @@ function SliderField({ label, value, min, max, step, onChange }: { label: string
 
 function SelectField({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; }) {
     return (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-2 py-1 text-[10px] bg-term-bg border border-term-border text-term-text">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-2 py-1.5 text-[11px] bg-term-bg border border-term-border text-term-text">
             {options.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}

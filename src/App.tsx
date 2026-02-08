@@ -1,14 +1,10 @@
 import { ThemeProvider } from './contexts/ThemeContext';
-import { GrainOverlay } from './components/GrainOverlay';
 import { Editor } from './components/Editor';
 
 function App() {
     return (
         <ThemeProvider>
-            <div className="h-screen flex flex-col overflow-hidden">
-                {/* Grain Overlay Effect */}
-                <GrainOverlay />
-
+            <div className="h-dvh min-h-0 flex flex-col overflow-hidden">
                 {/* Main Editor */}
                 <Editor />
             </div>

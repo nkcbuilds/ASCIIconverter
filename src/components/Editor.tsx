@@ -8,11 +8,6 @@ import { EffectType, EffectSettings, DEFAULT_SETTINGS, Preset } from '../types/e
 
 export type PreviewMode = 'processed' | 'split' | 'original';
 
-export interface RenderOutput {
-    dataUrl: string;
-    asciiText: string;
-}
-
 export function Editor() {
     const [sourceImage, setSourceImage] = useState<string | null>(null);
     const [sourceType, setSourceType] = useState<'image' | 'video' | 'webcam' | null>(null);
@@ -22,7 +17,7 @@ export function Editor() {
     const [fps, setFps] = useState(0);
     const [zoom, setZoom] = useState(100);
     const [previewMode, setPreviewMode] = useState<PreviewMode>('processed');
-    const [renderOutput, setRenderOutput] = useState<RenderOutput | null>(null);
+    const [exportCanvas, setExportCanvas] = useState<(() => HTMLCanvasElement | null) | null>(null);
 
     const handleFileSelect = useCallback((file: File) => {
         const url = URL.createObjectURL(file);
@@ -43,7 +38,6 @@ export function Editor() {
         setSourceType(null);
         setSettings(DEFAULT_SETTINGS);
         setPreviewMode('processed');
-        setRenderOutput(null);
     }, [sourceImage]);
 
     const handlePresetSelect = useCallback((preset: Preset) => {
@@ -52,7 +46,8 @@ export function Editor() {
     }, []);
 
     const handleExport = useCallback((format: EffectSettings['format']) => {
-        if (!renderOutput) return;
+        const canvas = exportCanvas?.();
+        if (!canvas) return;
 
         const download = (href: string, extension: string) => {
             const link = document.createElement('a');
@@ -62,38 +57,40 @@ export function Editor() {
         };
 
         if (format === 'text') {
-            const blob = new Blob([renderOutput.asciiText], { type: 'text/plain' });
+            const asciiText = generateAsciiTextFromCanvas(canvas, settings);
+            const blob = new Blob([asciiText], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             download(url, 'txt');
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 0);
             return;
         }
 
         if (format === 'svg') {
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg"><image href="${renderOutput.dataUrl}" width="100%" height="100%"/></svg>`;
+            const pngData = canvas.toDataURL('image/png');
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}"><image href="${pngData}" width="100%" height="100%"/></svg>`;
             const blob = new Blob([svg], { type: 'image/svg+xml' });
             const url = URL.createObjectURL(blob);
             download(url, 'svg');
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 0);
             return;
         }
 
         if (format === 'jpg') {
-            download(renderOutput.dataUrl, 'jpg');
+            download(canvas.toDataURL('image/jpeg', settings.quality / 100), 'jpg');
             return;
         }
 
         if (format === 'gif' || format === 'video') {
             // Fallback until dedicated encoders are wired.
-            download(renderOutput.dataUrl, 'png');
+            download(canvas.toDataURL('image/png'), 'png');
             return;
         }
 
-        download(renderOutput.dataUrl, 'png');
-    }, [activeEffect, renderOutput]);
+        download(canvas.toDataURL('image/png'), 'png');
+    }, [activeEffect, exportCanvas, settings]);
 
     return (
-        <div className="h-full flex flex-col bg-term-bg">
+        <div className="h-full min-h-0 flex flex-col bg-term-bg text-[13px] leading-tight">
             <TopBar
                 activeEffect={activeEffect}
                 fps={fps}
@@ -101,7 +98,7 @@ export function Editor() {
                 onReset={handleReset}
             />
 
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 min-h-0 flex overflow-hidden">
                 <LeftSidebar
                     activeEffect={activeEffect}
                     setActiveEffect={setActiveEffect}
@@ -119,8 +116,8 @@ export function Editor() {
                     zoom={zoom}
                     previewMode={previewMode}
                     onFpsUpdate={setFps}
-                    onOutputUpdate={setRenderOutput}
                     setIsProcessing={setIsProcessing}
+                    onExportReady={setExportCanvas}
                 />
 
                 <RightSidebar
@@ -141,4 +138,27 @@ export function Editor() {
             />
         </div>
     );
+}
+
+function generateAsciiTextFromCanvas(canvas: HTMLCanvasElement, settings: EffectSettings): string {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !canvas.width || !canvas.height) return '';
+
+    const charset = settings.customCharacters || ' .:-=+*#%@';
+    const step = Math.max(1, Math.floor(settings.cellSize));
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const lines: string[] = [];
+
+    for (let y = 0; y < canvas.height; y += step) {
+        let line = '';
+        for (let x = 0; x < canvas.width; x += step) {
+            const i = (y * canvas.width + x) * 4;
+            const brightness = (data[i] + data[i + 1] + data[i + 2]) / (3 * 255);
+            const index = Math.min(charset.length - 1, Math.floor(brightness * charset.length));
+            line += charset[index] ?? ' ';
+        }
+        lines.push(line);
+    }
+
+    return lines.join('\n');
 }

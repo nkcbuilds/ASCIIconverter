@@ -31,21 +31,21 @@ export function TopBar({ activeEffect, fps, isProcessing, onReset }: TopBarProps
     };
 
     return (
-        <div className="h-8 border-b border-term-border bg-term-panel flex items-center justify-between px-3">
+        <div className="h-9 border-b border-term-border bg-term-panel flex items-center justify-between px-3">
             {/* Left: Status */}
             <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                     <span
-                        className={`w-2 h-2 rounded-full ${isProcessing
+                        className={`w-2.5 h-2.5 rounded-full ${isProcessing
                                 ? 'bg-green-500 animate-pulse shadow-[0_0_8px_2px_rgba(34,197,94,0.6)]'
                                 : 'bg-term-text-dim'
                             }`}
                     />
-                    <span className="text-term-text text-[11px]">
+                    <span className="text-term-text text-[13px]">
                         {getEffectDisplayName(activeEffect)}
                     </span>
                     {isProcessing && (
-                        <span className="text-term-text-dim text-[10px]">(WebGPU)</span>
+                        <span className="text-term-text-dim text-[11px]">(WebGPU)</span>
                     )}
                 </div>
             </div>
@@ -53,7 +53,7 @@ export function TopBar({ activeEffect, fps, isProcessing, onReset }: TopBarProps
             {/* Center: Effect Name with FPS */}
             <div className="flex items-center gap-3">
                 {fps > 0 && (
-                    <span className="text-term-text-dim text-[10px] tabular-nums">
+                    <span className="text-term-text-dim text-[11px] tabular-nums">
                         {fps} FPS
                     </span>
                 )}
@@ -63,7 +63,7 @@ export function TopBar({ activeEffect, fps, isProcessing, onReset }: TopBarProps
             <div className="flex items-center gap-2">
                 <button
                     onClick={onReset}
-                    className="px-2 py-0.5 text-[10px] text-term-text-dim hover:text-term-text border border-term-border hover:border-term-text-dim transition-colors"
+                    className="px-2.5 py-1 text-[12px] text-term-text-dim hover:text-term-text border border-term-border hover:border-term-text-dim transition-colors"
                 >
                     Reset
                 </button>
