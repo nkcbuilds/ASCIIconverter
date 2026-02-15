@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState, useCallback, MutableRefObject } from 'react';
-import { EffectType, EffectSettings } from '../types/effects';
+import { EffectType, EffectSettings, SourceType } from '../types/effects';
 import { PreviewMode } from './Editor';
 
 interface CanvasProps {
     sourceImage: string | null;
-    sourceType: 'image' | 'video' | 'webcam' | null;
+    sourceType: SourceType;
     activeEffect: EffectType;
     settings: EffectSettings;
     zoom: number;
@@ -650,6 +650,231 @@ function drawProcessed(
             break;
         }
 
+        case 'pixel-sorting': {
+            // Pixel sorting effect - sorts pixels in rows based on brightness
+            const sortedPixels = new Uint8ClampedArray(pixels.length);
+            const threshold = settings.threshold;
+            
+            for (let y = 0; y < rows; y++) {
+                // Get row pixels with their brightness
+                const rowPixels: { r: number; g: number; b: number; brightness: number; x: number }[] = [];
+                for (let x = 0; x < cols; x++) {
+                    const i = (y * cols + x) * 4;
+                    const r = pixels[i];
+                    const g = pixels[i + 1];
+                    const b = pixels[i + 2];
+                    const brightness = (r + g + b) / (3 * 255);
+                    rowPixels.push({ r, g, b, brightness, x });
+                }
+                
+                // Sort pixels above threshold
+                const toSort = rowPixels.filter(p => p.brightness > threshold);
+                toSort.sort((a, b) => a.brightness - b.brightness);
+                
+                // Reconstruct row
+                let sortIndex = 0;
+                for (let x = 0; x < cols; x++) {
+                    const i = (y * cols + x) * 4;
+                    const original = rowPixels[x];
+                    const pixel = original.brightness > threshold && sortIndex < toSort.length 
+                        ? toSort[sortIndex++] 
+                        : original;
+                    sortedPixels[i] = pixel.r;
+                    sortedPixels[i + 1] = pixel.g;
+                    sortedPixels[i + 2] = pixel.b;
+                    sortedPixels[i + 3] = 255;
+                }
+            }
+            
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < renderCols; x++) {
+                    const i = (y * cols + x) * 4;
+                    if (settings.colored) {
+                        ctx.fillStyle = `rgb(${sortedPixels[i]}, ${sortedPixels[i + 1]}, ${sortedPixels[i + 2]})`;
+                    } else {
+                        const gray = Math.floor((sortedPixels[i] + sortedPixels[i + 1] + sortedPixels[i + 2]) / 3);
+                        ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                    }
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+            break;
+        }
+
+        case 'vhs-glitch': {
+            // VHS analog glitch effect
+            const time = now * 0.001;
+            const trackingNoise = Math.sin(time * 2) * 0.5 + 0.5;
+            
+            for (let y = 0; y < rows; y++) {
+                // Horizontal shift based on tracking noise
+                const shift = Math.floor(Math.sin(y * 0.1 + time * 3) * trackingNoise * 3);
+                
+                for (let x = 0; x < renderCols; x++) {
+                    const srcX = clamp(x + shift, 0, cols - 1);
+                    const idx = y * cols + srcX;
+                    
+                    // Chromatic aberration
+                    const aberrationOffset = Math.floor(Math.sin(y * 0.05 + time) * 2);
+                    const rIdx = y * cols + clamp(x + aberrationOffset, 0, cols - 1);
+                    const bIdx = y * cols + clamp(x - aberrationOffset, 0, cols - 1);
+                    
+                    const r = red[rIdx];
+                    const g = green[idx];
+                    const b = blue[bIdx];
+                    
+                    if (settings.colored) {
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                    } else {
+                        const gray = Math.floor((r + g + b) / 3);
+                        ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                    }
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+            
+            // Add random static lines
+            if (Math.random() > 0.7) {
+                const staticY = Math.floor(Math.random() * rows);
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.fillRect(0, staticY * cellSize, cols * cellSize, cellSize);
+            }
+            break;
+        }
+
+        case 'halftone-cmyk': {
+            // CMYK halftone effect
+            const angles = [15, 75, 0, 45]; // C, M, Y, K angles
+            const dotSize = cellSize * 0.5;
+            
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < renderCols; x++) {
+                    const idx = y * cols + x;
+                    const r = red[idx];
+                    const g = green[idx];
+                    const b = blue[idx];
+                    
+                    // Convert to CMYK
+                    const k = 1 - Math.max(r, g, b) / 255;
+                    const c = k < 1 ? (1 - r / 255 - k) / (1 - k) : 0;
+                    const m = k < 1 ? (1 - g / 255 - k) / (1 - k) : 0;
+                    const yVal = k < 1 ? (1 - b / 255 - k) / (1 - k) : 0;
+                    
+                    // Draw CMYK dots with rotation
+                    const cx = x * cellSize + cellSize / 2;
+                    const cy = y * cellSize + cellSize / 2;
+                    
+                    // Cyan
+                    ctx.fillStyle = `rgba(0, 255, 255, ${c})`;
+                    ctx.beginPath();
+                    ctx.arc(cx + Math.cos(angles[0]) * dotSize * 0.2, cy + Math.sin(angles[0]) * dotSize * 0.2, dotSize * c, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Magenta
+                    ctx.fillStyle = `rgba(255, 0, 255, ${m})`;
+                    ctx.beginPath();
+                    ctx.arc(cx + Math.cos(angles[1]) * dotSize * 0.2, cy + Math.sin(angles[1]) * dotSize * 0.2, dotSize * m, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Yellow
+                    ctx.fillStyle = `rgba(255, 255, 0, ${yVal})`;
+                    ctx.beginPath();
+                    ctx.arc(cx + Math.cos(angles[2]) * dotSize * 0.2, cy + Math.sin(angles[2]) * dotSize * 0.2, dotSize * yVal, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Key (black)
+                    ctx.fillStyle = `rgba(0, 0, 0, ${k})`;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, dotSize * k, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            break;
+        }
+
+        case 'grain': {
+            // Film grain effect
+            const grainIntensity = settings.grainIntensity;
+            
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < renderCols; x++) {
+                    const idx = y * cols + x;
+                    let r = red[idx];
+                    let g = green[idx];
+                    let b = blue[idx];
+                    
+                    // Add grain noise
+                    const grain = (Math.random() - 0.5) * grainIntensity * 100;
+                    r = clamp(r + grain, 0, 255);
+                    g = clamp(g + grain, 0, 255);
+                    b = clamp(b + grain, 0, 255);
+                    
+                    if (settings.colored) {
+                        ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+                    } else {
+                        const gray = Math.floor((r + g + b) / 3);
+                        ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                    }
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+            break;
+        }
+
+        case 'noise': {
+            // Digital noise effect
+            const noiseIntensity = settings.noiseIntensity;
+            
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < renderCols; x++) {
+                    const idx = y * cols + x;
+                    let r = red[idx];
+                    let g = green[idx];
+                    let b = blue[idx];
+                    
+                    // Add digital noise
+                    if (Math.random() < noiseIntensity) {
+                        r = Math.random() * 255;
+                        g = Math.random() * 255;
+                        b = Math.random() * 255;
+                    }
+                    
+                    if (settings.colored) {
+                        ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+                    } else {
+                        const gray = Math.floor((r + g + b) / 3);
+                        ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                    }
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+            break;
+        }
+
+        case 'scanlines': {
+            // CRT scanlines effect
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < renderCols; x++) {
+                    const idx = y * cols + x;
+                    const r = red[idx];
+                    const g = green[idx];
+                    const b = blue[idx];
+                    
+                    // Apply scanline darkening
+                    const scanlineFactor = y % 2 === 0 ? 1 : 0.7;
+                    
+                    if (settings.colored) {
+                        ctx.fillStyle = `rgb(${Math.floor(r * scanlineFactor)}, ${Math.floor(g * scanlineFactor)}, ${Math.floor(b * scanlineFactor)})`;
+                    } else {
+                        const gray = Math.floor((r + g + b) / 3 * scanlineFactor);
+                        ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                    }
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+            break;
+        }
+
         case 'ascii':
         default: {
             for (let y = 0; y < rows; y++) {
@@ -664,10 +889,10 @@ function drawProcessed(
         }
     }
 
-    if (settings.noise > 0) {
-        const overlayAlpha = Math.min(0.3, settings.noise * 0.25);
+    if (settings.noiseIntensity > 0) {
+        const overlayAlpha = Math.min(0.3, settings.noiseIntensity * 0.25);
         ctx.fillStyle = `rgba(255,255,255,${overlayAlpha})`;
-        const count = Math.min(20000, Math.floor(cols * rows * settings.noise));
+        const count = Math.min(20000, Math.floor(cols * rows * settings.noiseIntensity));
         for (let n = 0; n < count; n++) {
             const nx = Math.floor(Math.random() * cols) * cellSize;
             const ny = Math.floor(Math.random() * rows) * cellSize;

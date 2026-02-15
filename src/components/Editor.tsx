@@ -1,16 +1,17 @@
 import { useState, useCallback } from 'react';
 import { LeftSidebar } from './LeftSidebar';
 import { Canvas } from './Canvas';
+import { ModelViewer } from './ModelViewer';
 import { RightSidebar } from './RightSidebar';
 import { TopBar } from './TopBar';
 import { BottomBar } from './BottomBar';
-import { EffectType, EffectSettings, DEFAULT_SETTINGS, Preset } from '../types/effects';
+import { EffectType, EffectSettings, DEFAULT_SETTINGS, Preset, SourceType } from '../types/effects';
 
 export type PreviewMode = 'processed' | 'split' | 'original';
 
 export function Editor() {
     const [sourceImage, setSourceImage] = useState<string | null>(null);
-    const [sourceType, setSourceType] = useState<'image' | 'video' | 'webcam' | null>(null);
+    const [sourceType, setSourceType] = useState<SourceType>(null);
     const [activeEffect, setActiveEffect] = useState<EffectType>('ascii');
     const [settings, setSettings] = useState<EffectSettings>(DEFAULT_SETTINGS);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -21,8 +22,16 @@ export function Editor() {
 
     const handleFileSelect = useCallback((file: File) => {
         const url = URL.createObjectURL(file);
+        
+        // Detect file type
+        if (file.name.endsWith('.glb') || file.name.endsWith('.gltf')) {
+            setSourceType('model');
+        } else if (file.type.startsWith('video/')) {
+            setSourceType('video');
+        } else {
+            setSourceType('image');
+        }
         setSourceImage(url);
-        setSourceType(file.type.startsWith('video/') ? 'video' : 'image');
     }, []);
 
     const handleWebcam = useCallback(() => {
@@ -80,7 +89,7 @@ export function Editor() {
             return;
         }
 
-        if (format === 'gif' || format === 'video') {
+        if (format === 'gif' || format === 'mp4' || format === 'webm') {
             // Fallback until dedicated encoders are wired.
             download(canvas.toDataURL('image/png'), 'png');
             return;
@@ -108,17 +117,28 @@ export function Editor() {
                     hasSource={!!sourceImage}
                 />
 
-                <Canvas
-                    sourceImage={sourceImage}
-                    sourceType={sourceType}
-                    activeEffect={activeEffect}
-                    settings={settings}
-                    zoom={zoom}
-                    previewMode={previewMode}
-                    onFpsUpdate={setFps}
-                    setIsProcessing={setIsProcessing}
-                    onExportReady={setExportCanvas}
-                />
+                {sourceType === 'model' ? (
+                    <ModelViewer
+                        modelUrl={sourceImage}
+                        activeEffect={activeEffect}
+                        settings={settings}
+                        onCanvasReady={setExportCanvas}
+                        onFpsUpdate={setFps}
+                        setIsProcessing={setIsProcessing}
+                    />
+                ) : (
+                    <Canvas
+                        sourceImage={sourceImage}
+                        sourceType={sourceType}
+                        activeEffect={activeEffect}
+                        settings={settings}
+                        zoom={zoom}
+                        previewMode={previewMode}
+                        onFpsUpdate={setFps}
+                        setIsProcessing={setIsProcessing}
+                        onExportReady={setExportCanvas}
+                    />
+                )}
 
                 <RightSidebar
                     activeEffect={activeEffect}

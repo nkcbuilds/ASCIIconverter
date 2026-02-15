@@ -47,6 +47,13 @@ export function RightSidebar({
             'crosses': 'Crosses',
             'invert': 'Invert',
             'led': 'LED',
+            'pixel-sorting': 'Pixel Sorting',
+            'halftone': 'Halftone',
+            'halftone-cmyk': 'CMYK Halftone',
+            'vhs-glitch': 'VHS Glitch',
+            'scanlines': 'Scanlines',
+            'grain': 'Grain',
+            'noise': 'Noise',
         };
         return names[effect] || effect;
     };
@@ -99,7 +106,7 @@ export function RightSidebar({
                     <SliderField label="Brightness" value={settings.brightness} min={-100} max={100} step={1} onChange={(v) => updateSetting('brightness', v)} />
                     <SliderField label="Contrast" value={settings.contrast} min={-100} max={100} step={1} onChange={(v) => updateSetting('contrast', v)} />
                     <SliderField label="Threshold" value={settings.threshold} min={0} max={1} step={0.01} onChange={(v) => updateSetting('threshold', v)} />
-                    <SliderField label="Noise" value={settings.noise} min={0} max={1} step={0.01} onChange={(v) => updateSetting('noise', v)} />
+                    <SliderField label="Noise" value={settings.noiseIntensity} min={0} max={1} step={0.01} onChange={(v) => updateSetting('noiseIntensity', v)} />
                     <SliderField label="Blur" value={settings.blur} min={0} max={10} step={0.1} onChange={(v) => updateSetting('blur', v)} />
                 </SettingsSection>
 

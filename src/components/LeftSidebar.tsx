@@ -30,7 +30,7 @@ export function LeftSidebar({
         e.preventDefault();
         setIsDragging(false);
         const file = e.dataTransfer.files[0];
-        if (file && (file.type.startsWith('image/') || file.type.startsWith('video/'))) {
+        if (file && (file.type.startsWith('image/') || file.type.startsWith('video/') || file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
             onFileSelect(file);
         }
     }, [onFileSelect]);

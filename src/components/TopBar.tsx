@@ -26,6 +26,13 @@ export function TopBar({ activeEffect, fps, isProcessing, onReset }: TopBarProps
             'crosses': 'Crosses',
             'invert': 'Invert',
             'led': 'LED',
+            'pixel-sorting': 'Pixel Sorting',
+            'halftone': 'Halftone',
+            'halftone-cmyk': 'Halftone CMYK',
+            'vhs-glitch': 'VHS Glitch',
+            'scanlines': 'Scanlines',
+            'grain': 'Grain',
+            'noise': 'Noise',
         };
         return names[effect] || effect;
     };
